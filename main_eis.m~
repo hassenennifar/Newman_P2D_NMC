@@ -1,0 +1,87 @@
+clear
+
+vcut = 3; % stop condition for voltage
+cur = 21.5*8; % applied current (A/m2)
+
+%% Initialization
+
+P = init_param;
+P.dt = 0; % time step
+
+x = init_states(P,cur);
+xinit = x;
+
+k = 1;
+ts(k) = 0; % time 
+
+v(k) = terminalVoltage(k,x,P,cur); % terminal voltage
+qq(k) = 0;
+T(k) = P.T-273.15;
+utz = zeros(P.nj,k);
+utz(1:P.bnd_sep_neg,k) = P.cs0_neg/P.csmax_neg;
+utz(P.bnd_pos_sep:P.nj,k) = P.cs0_pos/P.csmax_pos;
+% total lithium in salt
+P.totLiold = 0.07;
+I(k) = 0;
+
+vinit = v(1);
+% Icur = [zeros(100,1); 21.5*ones(1000, 1); zeros(500,1)]; % uncomment for dynamic current
+
+%% run simulation
+
+
+index = 0;
+for potenz = -4:.1:2
+    k = 1;
+    clear ts I v x
+    ts(k) = 0;
+    I(k) = 0;
+    v(k) = vinit;
+    x(:,k) = xinit;
+    
+    freq = 10^potenz; % in Hz
+    w = 2*pi*freq;
+    mesh = 40;
+    P.dt = 1/freq/mesh;
+    
+    while ts(k) <= 20/freq
+        k = k+1;
+        ts(k) = ts(k-1)+P.dt;
+
+        x(:,k) = x(:,k-1);
+
+        curamp = .1;
+        cur = curamp*sin(w*ts(k));
+        I(k) = cur;
+
+        tic
+        [x, P, iter(k-1)] = runModel(k,P,x,cur,ts);
+        titer(k-1) = toc;
+
+        v(k) = terminalVoltage(k,x,P,cur);
+
+        utz(:,k) = zeros(P.nj,1);
+        [utz(:,k-1:k), qq(k), P] = temperature(x(:,k-1:k), utz(:,k-1:k), 2, cur, v(k), P);
+        T(k) = P.T-273.15;
+    end
+    phis = x(P.idx_phis:P.nx:P.nx*P.nj,:);
+    veis = phis(end,:)-phis(1,:);
+    fitobj = fit(ts(end-4*mesh+1:end)', ...
+        veis(end-4*mesh+1:end)'-mean(veis(end-4*mesh+1:end)), 'sin1');
+    index = index+1;
+    amp(index) = fitobj.a1 / curamp;
+    ang(index) = pi-fitobj.c1;
+    imp(index) = amp(index) * exp(1j*ang(index));
+    
+%     figure(10)
+%     cla
+%     plot(fitobj, ts, -v+mean(v))
+%     
+    figure(20)
+    hold on
+    cla
+    plot(imp, 'b-o')
+%     
+%     pause(.01)
+
+end
